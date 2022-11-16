@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mybackend-deployment
+  labels:
+    app: my-backend
+    type: backend
+spec:
+  template:
+    metadata:
+      name: mybackend-pod
+      labels:
+        app: myapp-backend
+        type: backend
+    spec:
+      containers:
+        - name: my-backend-container
+          image: r1s07-r32:10443/jsikorsk-backend
+          env:
+            - name: REDIS_HOST
+              value: myredis-service
+            - name: REDIS_PORT
+              value: '6379'
+            - name: PGPASSWORD
+              valueFrom: 
+                secretKeyRef:
+                  name: myapp-secret
+                  key: PGPASSWORD
+          envFrom:
+            - configMapRef:
+                name: postgres-config
+  replicas: 4
+  selector:
+    matchLabels:
+      type: backend

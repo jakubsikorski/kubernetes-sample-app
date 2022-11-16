@@ -1,0 +1,251 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ingress-service
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /api/?(.*)
+            pathType: Prefix
+            backend:
+              service:
+                name: mybackend-service
+                port:
+                  number: 5000
+          - path: /?(.*)
+            pathType: Prefix
+            backend:
+              service:
+                name: myfrontend-service
+                port:
+                  number: 80
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-storage
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: myapp-secret
+data:
+  PGPASSWORD: MXFhejJ3c3gzZWRjNHJmdg==
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mybackend-deployment
+  labels:
+    app: my-backend
+    type: backend
+spec:
+  template:
+    metadata:
+      name: mybackend-pod
+      labels:
+        app: myapp-backend
+        type: backend
+    spec:
+      containers:
+        - name: my-backend-container
+          image: r1s07-r32:10443/jsikorsk-backend
+          env:
+            - name: REDIS_HOST
+              value: myredis-service
+            - name: REDIS_PORT
+              value: '6379'
+            - name: PGPASSWORD
+              valueFrom: 
+                secretKeyRef:
+                  name: myapp-secret
+                  key: PGPASSWORD
+          envFrom:
+            - configMapRef:
+                name: postgres-config
+  replicas: 1
+  selector:
+    matchLabels:
+      type: backend
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: mybackend-service
+spec:
+  type: NodePort
+  ports:
+    - port: 5000
+      targetPort: 5000
+      # nodePort: 30009
+  selector:
+    app: myapp-backend
+    type: backend
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myfrontend-deployment
+  labels:
+    app: myapp-frontend
+    type: frontend
+spec:
+  template:
+    metadata:
+      name: myfrontend-pod
+      labels:
+        app: myapp-frontend
+        type: frontend
+    spec:
+      containers:
+        - name: myfrontend-container
+          image: r1s07-r32:10443/jsikorsk-frontend
+          ports:
+            - containerPort: 80
+  replicas: 1
+  selector:
+    matchLabels:
+      type: frontend
+---
+apiVersion: v1
+kind: Service
+metadata:
+    name: myfrontend-service
+spec:
+    type: NodePort
+    ports:
+        - targetPort: 80
+          port: 80
+          nodePort: 30008
+    selector:
+        type: frontend
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mypostgres-deployment
+  labels:
+    app: myapp-postgres
+    type: database
+spec:
+  template:
+    metadata:
+      name: mypostgres-pod
+      labels:
+        app: myapp-postgres
+        type: database
+    spec:
+      containers:
+        - name: my-postgres-container
+          image: postgres
+          volumeMounts:
+            - mountPath: "/postgres/var/lib/postgresql/data/pgdata"
+              name: postgresvolume
+              subPath: postgres
+          env:
+          - name: PGDATA
+            value: "/var/lib/postgresql/data/pgdata"
+          - name: POSTGRES_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: myapp-secret
+                key: PGPASSWORD
+      volumes:
+        - name: postgresvolume
+          persistentVolumeClaim:
+            claimName: postgres-pvc
+  replicas: 1
+  selector:
+    matchLabels:
+      type: database
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: mypostgres-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5432
+      targetPort: 5432
+  selector:
+    type: database
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-storage
+  resources:
+    requests:
+      storage: 10Mi
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-volume
+spec:
+  accessModes:
+    - ReadWriteOnce
+  capacity:
+    storage: 100Mi
+  volumeMode: Filesystem
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-storage
+  hostPath:
+    path: /data/persistentVolume
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-config
+data:
+  PGHOST: mypostgres-service
+  PGUSER: postgres
+  PGDATABASE: postgres
+  PGPORT: '5432'
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-deployment
+  labels:
+    app: myredis
+    type: cache
+spec:
+  template:
+    metadata:
+      name: redis-pod
+      labels:
+        app: myredis
+        type: cache
+    spec:
+      containers:
+        - name: my-redis-container
+          image: redis
+  replicas: 1
+  selector:
+    matchLabels:
+      type: cache
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: myredis-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 6379
+      targetPort: 6379
+  selector:
+    type: cache
